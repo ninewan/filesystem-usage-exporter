@@ -1,0 +1,56 @@
+# SSH 登录用户（默认 root）
+user: root
+
+# 每天执行一次的定时任务，6 字段 cron（含秒），默认每天 02:00
+schedule: "0 0 2 * * *"
+
+# /metrics 监听地址
+listen: "0.0.0.0:9111"
+
+servers:
+  - ip: 192.168.124.2
+    name: guibu8
+  - ip: 192.168.124.52
+    name: guibu9
+  - ip: 192.168.124.152
+    name: guibu3
+
+  - ip: 192.168.124.181
+    name: dev001
+  - ip: 192.168.124.183
+    name: dev002
+  - ip: 192.168.124.127
+    name: dev003
+
+
+  - ip: 82.157.170.175
+    name: tx002
+  - ip: 192.144.130.26
+    name: tx003
+  - ip: 81.70.146.99
+    name: tx005
+
+  - ip: 192.168.124.121
+    name: sentry
+  - ip: 192.168.124.125
+    name: mongo8
+  - ip: 192.168.124.131
+    name: dockers-131
+  - ip: 192.168.124.153
+    name: kafka4
+  - ip: 192.168.124.161
+    name: mysql84
+  - ip: 192.168.124.165
+    name: alma
+  - ip: 192.168.124.243
+    name: k3s-01
+  - ip: 192.168.124.150
+    name: seaweedfs
+  - ip: 192.168.124.190
+    name: docker1
+  - ip: 192.168.124.237
+    name: dockers2-237
+  - ip: 192.168.124.242
+    name: ext-docker
+  - ip: 192.168.124.243
+    name: k3s-01
