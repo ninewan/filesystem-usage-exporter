@@ -2,8 +2,14 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use axum::{extract::State, http::header, response::IntoResponse, routing::get, Router};
-use tokio::sync::RwLock;
+use axum::{
+    extract::State,
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
+    routing::get,
+    Router,
+};
+use tokio::sync::{Mutex, RwLock};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 /// 配置文件结构
@@ -54,6 +60,8 @@ type SharedTimestamp = Arc<RwLock<i64>>;
 struct AppState {
     metrics: SharedMetrics,
     last_check: SharedTimestamp,
+    refresh_lock: Arc<Mutex<()>>,
+    config: Arc<Config>,
 }
 
 /// 当前时间的秒级 Unix 时间戳
@@ -228,6 +236,39 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
+/// /refresh handler：立即触发一次采集并刷新内存数据
+async fn refresh(State(state): State<AppState>) -> Response {
+    // 用 Mutex 串行化，避免并发请求重复 ssh 打爆目标机器
+    let _guard = match state.refresh_lock.try_lock() {
+        Ok(g) => g,
+        Err(_) => {
+            return (
+                StatusCode::CONFLICT,
+                "a refresh is already in progress\n",
+            )
+                .into_response();
+        }
+    };
+
+    let before = *state.last_check.read().await;
+    collect_and_store(state.config.clone(), state.clone()).await;
+    let after = *state.last_check.read().await;
+    let count = state.metrics.read().await.len();
+
+    tracing::info!(
+        "manual refresh done: disks={}, ts={} (was {})",
+        count,
+        after,
+        before
+    );
+
+    (
+        StatusCode::OK,
+        format!("ok refreshed disks={} timestamp={}\n", count, after),
+    )
+        .into_response()
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -243,6 +284,8 @@ async fn main() -> Result<()> {
     let state = AppState {
         metrics: Arc::new(RwLock::new(Vec::new())),
         last_check: Arc::new(RwLock::new(0)),
+        refresh_lock: Arc::new(Mutex::new(())),
+        config: config.clone(),
     };
 
     // 启动时立即采集一次，确保 /metrics 一开始就有值
@@ -267,9 +310,15 @@ async fn main() -> Result<()> {
     tracing::info!("scheduled daily collection: {}", config.schedule);
 
     // HTTP 服务
-    let app = Router::new().route("/metrics", get(metrics)).with_state(state);
+    let app = Router::new()
+        .route("/metrics", get(metrics))
+        .route("/refresh", get(refresh))
+        .with_state(state);
     let listener = tokio::net::TcpListener::bind(&config.listen).await?;
-    tracing::info!("listening on http://{}/metrics", config.listen);
+    tracing::info!(
+        "listening on http://{}/metrics and http://{}/refresh",
+        config.listen, config.listen
+    );
     axum::serve(listener, app).await?;
 
     Ok(())
