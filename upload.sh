@@ -3,6 +3,9 @@
 #打包
 cargo build --release 
 
+#先停止, 免得文件忙碌scp不成功
+ssh root@192.168.124.160 "systemctl stop filesystem-usage-exporter"
+
 #上传
 scp ./target/release/filesystem-usage-exporter  root@192.168.124.160:/home/work/filesystem-usage-exporter/
 scp ./config.yaml  root@192.168.124.160:/home/work/filesystem-usage-exporter/
