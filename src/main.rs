@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use axum::{extract::State, http::header, response::IntoResponse, routing::get, Router};
@@ -47,10 +48,20 @@ struct DiskMetric {
 }
 
 type SharedMetrics = Arc<RwLock<Vec<DiskMetric>>>;
+type SharedTimestamp = Arc<RwLock<i64>>;
 
 #[derive(Clone)]
 struct AppState {
     metrics: SharedMetrics,
+    last_check: SharedTimestamp,
+}
+
+/// 当前时间的秒级 Unix 时间戳
+fn now_ts() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// 解析 `df -P` 输出，等价于用户给出的 awk 逻辑
@@ -145,9 +156,11 @@ async fn collect_all(config: Arc<Config>) -> Vec<DiskMetric> {
 
 /// 采集并写入共享内存
 async fn collect_and_store(config: Arc<Config>, state: AppState) {
+    let ts = now_ts();
     let data = collect_all(config).await;
     tracing::info!("total disks collected: {}", data.len());
     *state.metrics.write().await = data;
+    *state.last_check.write().await = ts;
 }
 
 /// 转义 Prometheus label 值
@@ -158,7 +171,7 @@ fn esc(s: &str) -> String {
 }
 
 /// 渲染为 Prometheus 文本格式
-fn render_metrics(data: &[DiskMetric]) -> String {
+fn render_metrics(data: &[DiskMetric], last_check: i64) -> String {
     let mut out = String::new();
 
     out.push_str("# HELP yishu_filesystem_size_bytes Total size of disk in bytes\n");
@@ -197,13 +210,18 @@ fn render_metrics(data: &[DiskMetric]) -> String {
         ));
     }
 
+    out.push_str("# HELP yishu_filesystem_check_timestamp Last collection time in seconds since epoch\n");
+    out.push_str("# TYPE yishu_filesystem_check_timestamp gauge\n");
+    out.push_str(&format!("yishu_filesystem_check_timestamp {}\n", last_check));
+
     out
 }
 
 /// /metrics handler
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     let data = state.metrics.read().await;
-    let body = render_metrics(&data);
+    let last_check = *state.last_check.read().await;
+    let body = render_metrics(&data, last_check);
     (
         [(header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
         body,
@@ -224,6 +242,7 @@ async fn main() -> Result<()> {
     let config = Arc::new(config);
     let state = AppState {
         metrics: Arc::new(RwLock::new(Vec::new())),
+        last_check: Arc::new(RwLock::new(0)),
     };
 
     // 启动时立即采集一次，确保 /metrics 一开始就有值

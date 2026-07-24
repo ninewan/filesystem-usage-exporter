@@ -42,8 +42,6 @@ servers:
     name: mysql84
   - ip: 192.168.124.165
     name: alma
-  - ip: 192.168.124.243
-    name: k3s-01
   - ip: 192.168.124.150
     name: seaweedfs
   - ip: 192.168.124.190
