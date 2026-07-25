@@ -291,23 +291,30 @@ async fn main() -> Result<()> {
     // 启动时立即采集一次，确保 /metrics 一开始就有值
     collect_and_store(config.clone(), state.clone()).await;
 
-    // 每天定时采集
+    // 每天定时采集（写死 Asia/Shanghai 时区，与运行环境解耦）
     let sched = JobScheduler::new().await?;
     let cfg = config.clone();
     let st = state.clone();
     sched
         .add(
-            Job::new_async(config.schedule.as_str(), move |_uuid, _l| {
-                let cfg = cfg.clone();
-                let st = st.clone();
-                Box::pin(async move {
-                    collect_and_store(cfg, st).await;
-                })
-            })?,
+            Job::new_async_tz(
+                config.schedule.as_str(),
+                chrono_tz::Asia::Shanghai,
+                move |_uuid, _l| {
+                    let cfg = cfg.clone();
+                    let st = st.clone();
+                    Box::pin(async move {
+                        collect_and_store(cfg, st).await;
+                    })
+                },
+            )?,
         )
         .await?;
     sched.start().await?;
-    tracing::info!("scheduled daily collection: {}", config.schedule);
+    tracing::info!(
+        "scheduled daily collection (Asia/Shanghai): {}",
+        config.schedule
+    );
 
     // HTTP 服务
     let app = Router::new()
